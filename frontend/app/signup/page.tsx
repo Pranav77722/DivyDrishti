@@ -2,16 +2,18 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { 
-  UserPlus, 
-  Mail, 
-  Lock, 
-  User, 
-  GraduationCap, 
+import {
+  UserPlus,
+  Mail,
+  Lock,
+  User,
+  GraduationCap,
   BookOpen,
   ArrowLeft,
   Home,
-  LogIn
+  LogIn,
+  BadgeCheck,
+  Building2
 } from "lucide-react";
 
 export default function SignUpPage() {
@@ -20,7 +22,9 @@ export default function SignUpPage() {
     username: "",
     email: "",
     password: "",
-    userType: "student"
+    userType: "student",
+    employeeId: "",
+    department: "Computer Science"
   });
   const [status, setStatus] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -76,7 +80,7 @@ export default function SignUpPage() {
                 <ArrowLeft className="w-5 h-5" />
                 <span className="font-medium">Back to Home</span>
               </button>
-              
+
               <div className="flex items-center gap-3">
                 <div className="p-3 bg-gradient-to-br from-purple-500 to-pink-600 rounded-xl shadow-lg">
                   <UserPlus className="w-6 h-6 text-white" />
@@ -114,11 +118,10 @@ export default function SignUpPage() {
                   <button
                     type="button"
                     onClick={() => setFormData(prev => ({ ...prev, userType: "student" }))}
-                    className={`p-3 rounded-xl border-2 transition-all duration-300 flex items-center justify-center gap-2 text-sm font-semibold hover:scale-105 ${
-                      formData.userType === "student" 
-                        ? "bg-blue-50 border-blue-300 text-blue-700 shadow-lg" 
-                        : "bg-white border-slate-200 text-slate-600 hover:border-slate-300"
-                    }`}
+                    className={`p-3 rounded-xl border-2 transition-all duration-300 flex items-center justify-center gap-2 text-sm font-semibold hover:scale-105 ${formData.userType === "student"
+                      ? "bg-blue-50 border-blue-300 text-blue-700 shadow-lg"
+                      : "bg-white border-slate-200 text-slate-600 hover:border-slate-300"
+                      }`}
                   >
                     <GraduationCap className="w-4 h-4" />
                     Student
@@ -126,11 +129,10 @@ export default function SignUpPage() {
                   <button
                     type="button"
                     onClick={() => setFormData(prev => ({ ...prev, userType: "teacher" }))}
-                    className={`p-3 rounded-xl border-2 transition-all duration-300 flex items-center justify-center gap-2 text-sm font-semibold hover:scale-105 ${
-                      formData.userType === "teacher" 
-                        ? "bg-emerald-50 border-emerald-300 text-emerald-700 shadow-lg" 
-                        : "bg-white border-slate-200 text-slate-600 hover:border-slate-300"
-                    }`}
+                    className={`p-3 rounded-xl border-2 transition-all duration-300 flex items-center justify-center gap-2 text-sm font-semibold hover:scale-105 ${formData.userType === "teacher"
+                      ? "bg-emerald-50 border-emerald-300 text-emerald-700 shadow-lg"
+                      : "bg-white border-slate-200 text-slate-600 hover:border-slate-300"
+                      }`}
                   >
                     <BookOpen className="w-4 h-4" />
                     Teacher
@@ -195,15 +197,59 @@ export default function SignUpPage() {
                 </div>
               </div>
 
+              {formData.userType === 'teacher' && (
+                <>
+                  {/* Department Selection */}
+                  <div>
+                    <label className="block text-slate-700 text-sm font-semibold mb-2">
+                      Department
+                    </label>
+                    <div className="relative">
+                      <Building2 className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-slate-400" />
+                      <select
+                        name="department"
+                        value={formData.department}
+                        onChange={handleChange}
+                        className="w-full bg-white border-2 border-slate-200 rounded-xl pl-12 pr-4 py-3 text-slate-800 focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 transition-all duration-300 appearance-none"
+                      >
+                        <option value="Computer Science">Computer Science</option>
+                        <option value="IT">IT</option>
+                        <option value="Electronics">Electronics</option>
+                        <option value="Mechanical">Mechanical</option>
+                        <option value="Civil">Civil</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Employee ID Input */}
+                  <div>
+                    <label className="block text-slate-700 text-sm font-semibold mb-2">
+                      Employee ID
+                    </label>
+                    <div className="relative">
+                      <BadgeCheck className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-slate-400" />
+                      <input
+                        name="employeeId"
+                        type="text"
+                        placeholder="Enter your Employee ID"
+                        required={formData.userType === 'teacher'}
+                        value={formData.employeeId}
+                        onChange={handleChange}
+                        className="w-full bg-white border-2 border-slate-200 rounded-xl pl-12 pr-4 py-3 text-slate-800 placeholder-slate-400 focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 transition-all duration-300"
+                      />
+                    </div>
+                  </div>
+                </>
+              )}
+
               {/* Sign Up Button */}
               <button
                 type="submit"
                 disabled={isLoading}
-                className={`w-full py-4 rounded-xl font-semibold transition-all duration-300 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none flex items-center justify-center gap-2 shadow-lg hover:shadow-xl ${
-                  formData.userType === 'teacher' 
-                    ? 'bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700' 
-                    : 'bg-gradient-to-r from-purple-500 to-pink-600 hover:from-purple-600 hover:to-pink-700'
-                } text-white`}
+                className={`w-full py-4 rounded-xl font-semibold transition-all duration-300 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none flex items-center justify-center gap-2 shadow-lg hover:shadow-xl ${formData.userType === 'teacher'
+                  ? 'bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700'
+                  : 'bg-gradient-to-r from-purple-500 to-pink-600 hover:from-purple-600 hover:to-pink-700'
+                  } text-white`}
               >
                 {isLoading ? (
                   <>
@@ -221,13 +267,12 @@ export default function SignUpPage() {
 
             {/* Status Message */}
             {status && (
-              <div className={`mt-6 p-4 rounded-xl text-center border-2 transition-all duration-300 ${
-                status.includes("successful") 
-                  ? "bg-emerald-50 text-emerald-700 border-emerald-200" 
-                  : status.includes("Error") || status.includes("failed")
+              <div className={`mt-6 p-4 rounded-xl text-center border-2 transition-all duration-300 ${status.includes("successful")
+                ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                : status.includes("Error") || status.includes("failed")
                   ? "bg-red-50 text-red-700 border-red-200"
                   : "bg-purple-50 text-purple-700 border-purple-200"
-              }`}>
+                }`}>
                 {status}
               </div>
             )}

@@ -9,7 +9,7 @@ export interface FaceData {
 }
 
 interface CameraCaptureProps {
-  onCapture: (dataUrl: string) => void;
+  onCapture: (dataUrl: string) => Promise<void> | void;
   captureIntervalMs?: number | null;
   singleShot?: boolean;
   isLiveMode?: boolean;
@@ -52,7 +52,7 @@ const CameraCapture: React.FC<CameraCaptureProps> = ({
     setCameraStatus("stopped");
   };
 
-  const capture = () => {
+  const capture = async () => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
     if (!video || !canvas || cameraStatus !== "active") return;
@@ -83,7 +83,7 @@ const CameraCapture: React.FC<CameraCaptureProps> = ({
     });
 
     const dataUrl = canvas.toDataURL("image/jpeg", 0.8);
-    onCapture(dataUrl);
+    await onCapture(dataUrl);
   };
 
   useEffect(() => {
@@ -91,10 +91,20 @@ const CameraCapture: React.FC<CameraCaptureProps> = ({
     return () => stopCamera();
   }, [singleShot, isLiveMode]);
 
+  const isProcessingRef = useRef<boolean>(false);
+
   useEffect(() => {
     if (intervalRef.current) clearInterval(intervalRef.current);
     if (captureIntervalMs && isLiveMode && cameraStatus === "active") {
-      intervalRef.current = setInterval(capture, captureIntervalMs);
+      intervalRef.current = setInterval(async () => {
+        if (isProcessingRef.current) return;
+        isProcessingRef.current = true;
+        try {
+          await capture();
+        } finally {
+          isProcessingRef.current = false;
+        }
+      }, captureIntervalMs);
     }
     return () => {
       if (intervalRef.current) {

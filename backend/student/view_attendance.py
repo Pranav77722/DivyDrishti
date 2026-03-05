@@ -1,4 +1,5 @@
 from flask import Blueprint, request, jsonify, current_app
+from firebase_config import doc_to_dict
 from datetime import datetime
 import time
 
@@ -20,22 +21,41 @@ def get_attendance():
 
     try:
         # Query attendance collection
-        query = {}
-        if date: query["date"] = date
-        if department: query["department"] = department
-        if year: query["year"] = year
-        if division: query["division"] = division
-        if subject: query["subject"] = subject
+        query = attendance_col
+        if date:
+            query = query.where('date', '==', date)
+        if department:
+            query = query.where('department', '==', department)
+        if year:
+            query = query.where('year', '==', year)
+        if division:
+            query = query.where('division', '==', division)
+        if subject:
+            query = query.where('subject', '==', subject)
 
-        attendance_doc = attendance_col.find_one(query)
+        attendance_docs = list(query.limit(1).get())
+        attendance_doc = attendance_docs[0].to_dict() if attendance_docs else None
 
         # Build roster from students collection for given class filters
-        roster_filter = {}
-        if department: roster_filter["department"] = department
-        if year: roster_filter["year"] = year
-        if division: roster_filter["division"] = division
+        roster_query = students_col
+        has_roster_filter = False
+        if department:
+            roster_query = roster_query.where('department', '==', department)
+            has_roster_filter = True
+        if year:
+            roster_query = roster_query.where('year', '==', year)
+            has_roster_filter = True
+        if division:
+            roster_query = roster_query.where('division', '==', division)
+            has_roster_filter = True
 
-        roster = list(students_col.find(roster_filter)) if roster_filter else []
+        roster = []
+        if has_roster_filter:
+            roster_docs = list(roster_query.get())
+            for doc in roster_docs:
+                student = doc.to_dict()
+                student['_id'] = doc.id
+                roster.append(student)
 
         # Map session students by id for quick lookup
         session_map = {}
@@ -64,10 +84,8 @@ def get_attendance():
                 # Ensure marked_at is JSON-serializable (string)
                 if marked_at is not None:
                     try:
-                        # If it's a datetime from Mongo, convert to ISO
                         marked_at = marked_at.isoformat()
                     except Exception:
-                        # Fallback to str()
                         marked_at = str(marked_at)
             else:
                 present = False
@@ -82,7 +100,9 @@ def get_attendance():
                     "year": str(attendance_doc.get("year")) if attendance_doc else str(year),
                     "division": str(attendance_doc.get("division")) if attendance_doc else str(division),
                     "status": "present" if present else "absent",
-                    "markedAt": marked_at
+                    "markedAt": marked_at,
+                    "teacherName": str(attendance_doc.get("teacher_name")) if attendance_doc and attendance_doc.get("teacher_name") else "-",
+                    "duration": str(attendance_doc.get("duration")) if attendance_doc and attendance_doc.get("duration") else "-"
                 })
 
         # Also include any session-only students not in roster (fallback)
@@ -111,12 +131,13 @@ def get_attendance():
                     "year": str(attendance_doc.get("year")),
                     "division": str(attendance_doc.get("division")),
                     "status": "present" if s.get("present") else "absent",
-                    "markedAt": marked
+                    "markedAt": marked,
+                    "teacherName": str(attendance_doc.get("teacher_name", "-")),
+                    "duration": str(attendance_doc.get("duration", "-"))
                 })
 
         # Stats computed against roster size
-        student_filter = roster_filter
-        total_students = students_col.count_documents(student_filter) if student_filter else 0
+        total_students = len(roster) if has_roster_filter else 0
         present_count = sum(1 for r in attendance_list if r.get("status") == "present")
         absent_count = max(total_students - present_count, 0)
         attendance_rate = round((present_count / total_students * 100) if total_students > 0 else 0, 1)
@@ -151,14 +172,20 @@ def export_attendance():
 
     try:
         # Get attendance doc
-        query = {}
-        if date: query["date"] = date
-        if department: query["department"] = department
-        if year: query["year"] = year
-        if division: query["division"] = division
-        if subject: query["subject"] = subject
+        query = attendance_col
+        if date:
+            query = query.where('date', '==', date)
+        if department:
+            query = query.where('department', '==', department)
+        if year:
+            query = query.where('year', '==', year)
+        if division:
+            query = query.where('division', '==', division)
+        if subject:
+            query = query.where('subject', '==', subject)
 
-        attendance_doc = attendance_col.find_one(query)
+        attendance_docs = list(query.limit(1).get())
+        attendance_doc = attendance_docs[0].to_dict() if attendance_docs else None
         present_students = set()
 
         if attendance_doc:
@@ -166,15 +193,19 @@ def export_attendance():
                 present_students.add(student.get("student_id"))
 
         # Get all students in that class
-        student_filter = {}
-        if department: student_filter["department"] = department
-        if year: student_filter["year"] = year
-        if division: student_filter["division"] = division
+        student_query = students_col
+        if department:
+            student_query = student_query.where('department', '==', department)
+        if year:
+            student_query = student_query.where('year', '==', year)
+        if division:
+            student_query = student_query.where('division', '==', division)
 
-        students = list(students_col.find(student_filter))
+        student_docs = list(student_query.get())
         export_data = []
 
-        for student in students:
+        for doc in student_docs:
+            student = doc.to_dict()
             sid = student.get("studentId") or student.get("student_id")
             name = student.get("studentName") or student.get("student_name")
             status = "present" if sid in present_students else "absent"
@@ -182,6 +213,8 @@ def export_attendance():
                 "studentId": str(sid) if sid is not None else "",
                 "name": name,
                 "subject": str(subject) if subject else "N/A",
+                "teacher": str(attendance_doc.get("teacher_name", "-")) if attendance_doc else "-",
+                "duration": f"{attendance_doc.get('duration', '-')} mins" if attendance_doc and attendance_doc.get("duration") else "-",
                 "date": str(date) if date else "N/A",
                 "status": status
             })

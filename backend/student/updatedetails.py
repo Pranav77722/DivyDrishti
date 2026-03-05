@@ -1,5 +1,6 @@
 from flask import Blueprint, request, jsonify, current_app
-from bson import ObjectId
+from firebase_config import doc_to_dict
+from collections import Counter
 import time
 
 student_update_bp = Blueprint("student_update", __name__)
@@ -24,29 +25,39 @@ def get_students():
         
         # For students: only show their own record
         if user_type == 'student':
-            query = {"email": user_email}
+            query = students_col.where('email', '==', user_email)
             
-            # Get query parameters for additional filtering
+            # Get additional filters
             department = request.args.get('department', '')
             year = request.args.get('year', '')
             search = request.args.get('search', '')
             
             if department:
-                query['department'] = department
+                query = query.where('department', '==', department)
             if year:
-                query['year'] = year
-            if search:
-                query['$or'] = [
-                    {'studentName': {'$regex': search, '$options': 'i'}},
-                    {'studentId': {'$regex': search, '$options': 'i'}}
-                ]
+                query = query.where('year', '==', year)
             
-            # Exclude embedding field from response for performance
-            students = list(students_col.find(query, {"embedding": 0}).sort('studentName', 1))
+            docs = list(query.get())
+            students = []
+            for doc in docs:
+                student = doc.to_dict()
+                student['_id'] = doc.id
+                # Remove embeddings for performance
+                student.pop('embedding', None)
+                student.pop('embeddings', None)
+                
+                # Client-side search filter (Firestore doesn't support regex)
+                if search:
+                    search_lower = search.lower()
+                    name_match = search_lower in student.get('studentName', '').lower()
+                    id_match = search_lower in student.get('studentId', '').lower()
+                    if not (name_match or id_match):
+                        continue
+                
+                students.append(student)
             
-            # Convert ObjectId to string for JSON serialization
-            for student in students:
-                student['_id'] = str(student['_id'])
+            # Sort by studentName
+            students.sort(key=lambda s: s.get('studentName', '').lower())
             
             return jsonify({
                 "success": True, 
@@ -79,10 +90,15 @@ def get_student(student_id):
         if not user_email:
             return jsonify({"success": False, "error": "User email required for authorization"}), 401
         
-        # Get student record
-        student = students_col.find_one({"_id": ObjectId(student_id)}, {"embedding": 0})
+        # Get student record by Firestore document ID
+        doc = students_col.document(student_id).get()
+        student = doc_to_dict(doc)
         if not student:
             return jsonify({"success": False, "error": "Student not found"}), 404
+        
+        # Remove embeddings for response
+        student.pop('embedding', None)
+        student.pop('embeddings', None)
         
         # Authorization based on user type
         if user_type == 'student':
@@ -98,7 +114,6 @@ def get_student(student_id):
         else:
             return jsonify({"success": False, "error": "Invalid user type"}), 403
         
-        student['_id'] = str(student['_id'])
         return jsonify({"success": True, "student": student})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
@@ -120,7 +135,9 @@ def update_student(student_id):
             return jsonify({"success": False, "error": "User email required for authorization"}), 401
         
         # Validate student exists
-        student = students_col.find_one({"_id": ObjectId(student_id)})
+        doc_ref = students_col.document(student_id)
+        doc = doc_ref.get()
+        student = doc_to_dict(doc)
         if not student:
             return jsonify({"success": False, "error": "Student not found"}), 404
         
@@ -144,22 +161,17 @@ def update_student(student_id):
             # Teachers can update any student record
             # Check if new email conflicts with existing one (if changed)
             if data.get('email') and data.get('email') != student.get('email'):
-                existing = students_col.find_one({
-                    'email': data.get('email'),
-                    '_id': {'$ne': ObjectId(student_id)}
-                })
-                if existing:
+                existing = list(students_col.where('email', '==', data.get('email')).limit(1).get())
+                # Make sure it's not the same document
+                if existing and existing[0].id != student_id:
                     return jsonify({"success": False, "error": "Email already registered"}), 400
         else:
             return jsonify({"success": False, "error": "Invalid user type"}), 403
         
         # Check if new student ID conflicts with existing one (if changed)
         if data.get('studentId') and data.get('studentId') != student.get('studentId'):
-            existing = students_col.find_one({
-                'studentId': data.get('studentId'),
-                '_id': {'$ne': ObjectId(student_id)}
-            })
-            if existing:
+            existing = list(students_col.where('studentId', '==', data.get('studentId')).limit(1).get())
+            if existing and existing[0].id != student_id:
                 return jsonify({"success": False, "error": "Student ID already exists"}), 400
         
         # Update student data (preserve face data)
@@ -180,21 +192,15 @@ def update_student(student_id):
         if user_type == 'teacher':
             update_data["email"] = data.get("email", student.get("email"))
         
-        result = students_col.update_one(
-            {"_id": ObjectId(student_id)}, 
-            {"$set": update_data}
-        )
+        doc_ref.update(update_data)
         
-        if result.modified_count > 0:
-            message = "Student details updated successfully"
-            if user_type == 'student':
-                message = "Your student details updated successfully"
-            return jsonify({
-                "success": True, 
-                "message": message
-            })
-        else:
-            return jsonify({"success": False, "error": "No changes made"})
+        message = "Student details updated successfully"
+        if user_type == 'student':
+            message = "Your student details updated successfully"
+        return jsonify({
+            "success": True, 
+            "message": message
+        })
     
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
@@ -213,7 +219,9 @@ def delete_student(student_id):
         if not user_email:
             return jsonify({"success": False, "error": "User email required for authorization"}), 401
         
-        student = students_col.find_one({"_id": ObjectId(student_id)})
+        doc_ref = students_col.document(student_id)
+        doc = doc_ref.get()
+        student = doc_to_dict(doc)
         if not student:
             return jsonify({"success": False, "error": "Student not found"}), 404
         
@@ -232,7 +240,7 @@ def delete_student(student_id):
             return jsonify({"success": False, "error": "Invalid user type"}), 403
         
         # Delete complete student record (including face data)
-        students_col.delete_one({"_id": ObjectId(student_id)})
+        doc_ref.delete()
         
         message = f"Student {student.get('studentName')} deleted successfully"
         if user_type == 'student':
@@ -285,28 +293,40 @@ def get_all_students_admin():
         student_id = request.args.get('studentId', '')
         search = request.args.get('search', '')
         
-        # Build query
-        query = {}
+        # Build Firestore query
+        query = students_col
         if department:
-            query['department'] = department
+            query = query.where('department', '==', department)
         if year:
-            query['year'] = year
+            query = query.where('year', '==', year)
         if division:
-            query['division'] = division
-        if student_id:
-            query['studentId'] = {'$regex': student_id, '$options': 'i'}
-        if search:
-            query['$or'] = [
-                {'studentName': {'$regex': search, '$options': 'i'}},
-                {'studentId': {'$regex': search, '$options': 'i'}},
-                {'email': {'$regex': search, '$options': 'i'}}
-            ]
+            query = query.where('division', '==', division)
         
-        # Get all students (admin view) - exclude embedding for performance
-        students = list(students_col.find(query, {"embedding": 0}).sort('studentName', 1))
+        docs = list(query.get())
+        students = []
+        for doc in docs:
+            student = doc.to_dict()
+            student['_id'] = doc.id
+            # Remove embeddings for performance
+            student.pop('embedding', None)
+            student.pop('embeddings', None)
+            
+            # Client-side filtering for regex-like searches
+            if student_id:
+                if student_id.lower() not in student.get('studentId', '').lower():
+                    continue
+            if search:
+                search_lower = search.lower()
+                name_match = search_lower in student.get('studentName', '').lower()
+                id_match = search_lower in student.get('studentId', '').lower()
+                email_match = search_lower in student.get('email', '').lower()
+                if not (name_match or id_match or email_match):
+                    continue
+            
+            students.append(student)
         
-        for student in students:
-            student['_id'] = str(student['_id'])
+        # Sort by studentName
+        students.sort(key=lambda s: s.get('studentName', '').lower())
         
         return jsonify({
             "success": True, 
@@ -340,39 +360,41 @@ def search_students_teacher():
         year = request.args.get('year', '').strip()
         division = request.args.get('division', '').strip()
         
-        # Build query
-        query = {}
-        
-        if student_id:
-            query['studentId'] = {'$regex': student_id, '$options': 'i'}
-        
-        if student_name:
-            query['studentName'] = {'$regex': student_name, '$options': 'i'}
-        
+        # Build Firestore query with exact-match filters
+        query = students_col
         if department:
-            query['department'] = department
-            
+            query = query.where('department', '==', department)
         if year:
-            query['year'] = year
-            
+            query = query.where('year', '==', year)
         if division:
-            query['division'] = division
+            query = query.where('division', '==', division)
         
-        # Execute search (limit to 50 results for performance)
-        students = list(students_col.find(
-            query, 
-            {"embedding": 0}  # Exclude embedding for performance
-        ).limit(50).sort('studentName', 1))
+        docs = list(query.get())
+        students = []
+        for doc in docs:
+            student = doc.to_dict()
+            student['_id'] = doc.id
+            student.pop('embedding', None)
+            student.pop('embeddings', None)
+            
+            # Client-side filtering for text search (replaces $regex)
+            if student_id:
+                if student_id.lower() not in student.get('studentId', '').lower():
+                    continue
+            if student_name:
+                if student_name.lower() not in student.get('studentName', '').lower():
+                    continue
+            
+            students.append(student)
         
-        # Convert ObjectId to string
-        for student in students:
-            student['_id'] = str(student['_id'])
+        # Sort and limit
+        students.sort(key=lambda s: s.get('studentName', '').lower())
+        students = students[:50]  # Limit to 50 results
         
         return jsonify({
             "success": True,
             "students": students,
-            "count": len(students),
-            "query": query
+            "count": len(students)
         })
         
     except Exception as e:
@@ -393,20 +415,26 @@ def get_student_by_id_teacher(student_id_or_db_id):
                 "error": "Unauthorized: Teacher access required"
             }), 403
         
-        # Try to find by studentId first (e.g., "STU001"), then by database _id
-        student = students_col.find_one({"studentId": student_id_or_db_id}, {"embedding": 0})
+        # Try to find by studentId field first
+        docs = list(students_col.where('studentId', '==', student_id_or_db_id).limit(1).get())
         
-        if not student:
-            # If not found by studentId, try by database ObjectId
+        if not docs:
+            # Try by Firestore document ID
             try:
-                student = students_col.find_one({"_id": ObjectId(student_id_or_db_id)}, {"embedding": 0})
-            except:
+                doc = students_col.document(student_id_or_db_id).get()
+                if doc.exists:
+                    docs = [doc]
+            except Exception:
                 pass
         
-        if not student:
+        if not docs:
             return jsonify({"success": False, "error": f"Student with ID '{student_id_or_db_id}' not found"}), 404
         
-        student['_id'] = str(student['_id'])
+        student = docs[0].to_dict()
+        student['_id'] = docs[0].id
+        student.pop('embedding', None)
+        student.pop('embeddings', None)
+        
         return jsonify({"success": True, "student": student})
         
     except Exception as e:
@@ -432,26 +460,22 @@ def update_student_teacher(student_db_id):
             }), 403
         
         # Validate student exists
-        student = students_col.find_one({"_id": ObjectId(student_db_id)})
+        doc_ref = students_col.document(student_db_id)
+        doc = doc_ref.get()
+        student = doc_to_dict(doc)
         if not student:
             return jsonify({"success": False, "error": "Student not found"}), 404
         
         # Check if new student ID conflicts with existing one (if changed)
         if data.get('studentId') and data.get('studentId') != student.get('studentId'):
-            existing = students_col.find_one({
-                'studentId': data.get('studentId'),
-                '_id': {'$ne': ObjectId(student_db_id)}
-            })
-            if existing:
+            existing = list(students_col.where('studentId', '==', data.get('studentId')).limit(1).get())
+            if existing and existing[0].id != student_db_id:
                 return jsonify({"success": False, "error": "Student ID already exists"}), 400
         
         # Check if new email conflicts with existing one (if changed)
         if data.get('email') and data.get('email') != student.get('email'):
-            existing = students_col.find_one({
-                'email': data.get('email'),
-                '_id': {'$ne': ObjectId(student_db_id)}
-            })
-            if existing:
+            existing = list(students_col.where('email', '==', data.get('email')).limit(1).get())
+            if existing and existing[0].id != student_db_id:
                 return jsonify({"success": False, "error": "Email already registered"}), 400
         
         # Update student data (preserve face data)
@@ -469,18 +493,12 @@ def update_student_teacher(student_db_id):
             "updated_by_type": "teacher"
         }
         
-        result = students_col.update_one(
-            {"_id": ObjectId(student_db_id)}, 
-            {"$set": update_data}
-        )
+        doc_ref.update(update_data)
         
-        if result.modified_count > 0:
-            return jsonify({
-                "success": True, 
-                "message": f"Student {data.get('studentName', 'record')} updated successfully by teacher"
-            })
-        else:
-            return jsonify({"success": False, "error": "No changes made"})
+        return jsonify({
+            "success": True, 
+            "message": f"Student {data.get('studentName', 'record')} updated successfully by teacher"
+        })
     
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
@@ -500,12 +518,14 @@ def delete_student_teacher(student_db_id):
                 "error": "Unauthorized: Teacher access required"
             }), 403
         
-        student = students_col.find_one({"_id": ObjectId(student_db_id)})
+        doc_ref = students_col.document(student_db_id)
+        doc = doc_ref.get()
+        student = doc_to_dict(doc)
         if not student:
             return jsonify({"success": False, "error": "Student not found"}), 404
         
         # Delete complete student record (including face data)
-        students_col.delete_one({"_id": ObjectId(student_db_id)})
+        doc_ref.delete()
         
         return jsonify({
             "success": True, 
@@ -541,33 +561,40 @@ def search_students():
         if not search_term and not department and not year:
             return jsonify({"success": False, "error": "Search term or filters required"}), 400
         
-        # Build search query
-        query = {}
+        # Build Firestore query
+        query = students_col
         
         # For students, limit to their own record
         if user_type == 'student':
-            query['email'] = user_email
-        
-        if search_term:
-            query['$or'] = [
-                {'studentName': {'$regex': search_term, '$options': 'i'}},
-                {'studentId': {'$regex': search_term, '$options': 'i'}},
-                {'email': {'$regex': search_term, '$options': 'i'}}
-            ]
+            query = query.where('email', '==', user_email)
         
         if department:
-            query['department'] = department
+            query = query.where('department', '==', department)
         if year:
-            query['year'] = year
+            query = query.where('year', '==', year)
         
-        # Execute search
-        students = list(students_col.find(
-            query, 
-            {"embedding": 0}  # Exclude embedding for performance
-        ).limit(limit).sort('studentName', 1))
+        docs = list(query.get())
+        students = []
+        for doc in docs:
+            student = doc.to_dict()
+            student['_id'] = doc.id
+            student.pop('embedding', None)
+            student.pop('embeddings', None)
+            
+            # Client-side text search (replaces $regex + $or)
+            if search_term:
+                search_lower = search_term.lower()
+                name_match = search_lower in student.get('studentName', '').lower()
+                id_match = search_lower in student.get('studentId', '').lower()
+                email_match = search_lower in student.get('email', '').lower()
+                if not (name_match or id_match or email_match):
+                    continue
+            
+            students.append(student)
         
-        for student in students:
-            student['_id'] = str(student['_id'])
+        # Sort and limit
+        students.sort(key=lambda s: s.get('studentName', '').lower())
+        students = students[:limit]
         
         return jsonify({
             "success": True,
@@ -595,25 +622,30 @@ def get_student_stats():
                 "error": "Unauthorized: Teacher/Admin access required"
             }), 403
         
-        # Basic stats
-        total_students = students_col.count_documents({})
+        # Get all students (lightweight - only needed fields)
+        docs = list(students_col.select(['department', 'year', 'face_registered', 'embeddings']).get())
         
-        # Students by department
-        dept_pipeline = [
-            {"$group": {"_id": "$department", "count": {"$sum": 1}}},
-            {"$sort": {"count": -1}}
-        ]
-        dept_stats = list(students_col.aggregate(dept_pipeline))
+        total_students = len(docs)
         
-        # Students by year
-        year_pipeline = [
-            {"$group": {"_id": "$year", "count": {"$sum": 1}}},
-            {"$sort": {"_id": 1}}
-        ]
-        year_stats = list(students_col.aggregate(year_pipeline))
+        # Students by department (replaces MongoDB aggregate pipeline)
+        dept_counter = Counter()
+        year_counter = Counter()
+        face_registered = 0
         
-        # Students with face data
-        face_registered = students_col.count_documents({"embedding": {"$exists": True, "$ne": None}})
+        for doc in docs:
+            data = doc.to_dict()
+            dept = data.get('department', 'Unknown')
+            yr = data.get('year', 'Unknown')
+            dept_counter[dept] += 1
+            year_counter[yr] += 1
+            if data.get('face_registered') or data.get('embeddings'):
+                face_registered += 1
+        
+        dept_stats = [{"_id": dept, "count": count} for dept, count in dept_counter.most_common()]
+        year_stats = sorted(
+            [{"_id": yr, "count": count} for yr, count in year_counter.items()],
+            key=lambda x: x['_id']
+        )
         
         return jsonify({
             "success": True,

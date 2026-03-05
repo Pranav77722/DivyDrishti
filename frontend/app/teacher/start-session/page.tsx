@@ -20,28 +20,45 @@ export default function DemoSessionPage() {
     department: "",
     year: "",
     division: "",
+    duration: "60", // default 60 minutes
   });
 
   const departments = ["Computer Science", "IT", "Electronics", "Mechanical", "Civil"];
   const years = ["1st Year", "2nd Year", "3rd Year", "4th Year"];
   const divisions = ["A", "B", "C", "D"];
+  const durations = [
+    { label: "30 Minutes", value: "30" },
+    { label: "45 Minutes", value: "45" },
+    { label: "60 Minutes", value: "60" },
+    { label: "90 Minutes", value: "90" },
+    { label: "120 Minutes", value: "120" }
+  ];
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     setForm({ ...form, [e.target.name]: e.target.value });
   };
 
   const createSession = async () => {
-    if (!form.date || !form.subject || !form.department || !form.year || !form.division) {
+    if (!form.date || !form.subject || !form.department || !form.year || !form.division || !form.duration) {
       setStatus("Please fill all fields");
       return;
     }
 
     setStatus("Creating session...");
     try {
+      const teacherName = localStorage.getItem("username") || "Unknown Teacher";
+      const teacherId = localStorage.getItem("employeeId") || "";
+
+      const payload = {
+        ...form,
+        teacher_name: teacherName,
+        teacher_id: teacherId
+      };
+
       const res = await fetch("http://localhost:5000/api/attendance/create_session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
       if (data.session_id) {
@@ -130,7 +147,7 @@ export default function DemoSessionPage() {
               >
                 <ArrowLeft className="w-6 h-6 text-gray-600 group-hover:text-gray-800 transition-colors" />
               </button>
-              
+
               <div className="flex items-center gap-3">
                 <div className="p-2 bg-gradient-to-r from-green-100 to-emerald-100 rounded-lg">
                   <Camera className="w-6 h-6 text-green-600" />
@@ -144,17 +161,14 @@ export default function DemoSessionPage() {
 
             {/* Status Indicator */}
             <div className="flex items-center gap-3">
-              <div className={`flex items-center gap-2 px-3 py-2 rounded-lg ${
-                recognitionStarted 
-                  ? "bg-green-100 border border-green-300" 
-                  : "bg-gray-100 border border-gray-300"
-              }`}>
-                <div className={`w-2 h-2 rounded-full ${
-                  recognitionStarted ? "bg-green-600 animate-pulse" : "bg-gray-400"
-                }`} />
-                <span className={`text-sm font-medium ${
-                  recognitionStarted ? "text-green-700" : "text-gray-600"
+              <div className={`flex items-center gap-2 px-3 py-2 rounded-lg ${recognitionStarted
+                ? "bg-green-100 border border-green-300"
+                : "bg-gray-100 border border-gray-300"
                 }`}>
+                <div className={`w-2 h-2 rounded-full ${recognitionStarted ? "bg-green-600 animate-pulse" : "bg-gray-400"
+                  }`} />
+                <span className={`text-sm font-medium ${recognitionStarted ? "text-green-700" : "text-gray-600"
+                  }`}>
                   {recognitionStarted ? "LIVE" : "SETUP"}
                 </span>
               </div>
@@ -207,14 +221,13 @@ export default function DemoSessionPage() {
             <div className="flex flex-wrap gap-4 text-sm">
               <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/70 border border-gray-200">
                 <span className="text-gray-600">Status:</span>
-                <span className={`font-medium ${
-                  recognitionStarted ? "text-green-600" : 
+                <span className={`font-medium ${recognitionStarted ? "text-green-600" :
                   sessionId ? "text-amber-600" : "text-gray-600"
-                }`}>
+                  }`}>
                   {recognitionStarted ? "Active" : sessionId ? "Ready" : "Setup"}
                 </span>
               </div>
-              
+
               <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/70 border border-gray-200">
                 <span className="text-gray-600">Students:</span>
                 <span className="font-medium text-gray-800">
@@ -244,10 +257,10 @@ export default function DemoSessionPage() {
                 <div className="space-y-4">
                   <div>
                     <label className="text-gray-700 text-sm mb-2 block font-medium">Date</label>
-                    <input 
-                      type="date" 
-                      name="date" 
-                      value={form.date} 
+                    <input
+                      type="date"
+                      name="date"
+                      value={form.date}
                       onChange={handleChange}
                       className="w-full p-3 rounded-lg bg-white/60 border border-gray-200 text-gray-800 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-300"
                     />
@@ -255,11 +268,11 @@ export default function DemoSessionPage() {
 
                   <div>
                     <label className="text-gray-700 text-sm mb-2 block font-medium">Subject</label>
-                    <input 
-                      type="text" 
-                      name="subject" 
+                    <input
+                      type="text"
+                      name="subject"
                       placeholder="Enter subject name"
-                      value={form.subject} 
+                      value={form.subject}
                       onChange={handleChange}
                       className="w-full p-3 rounded-lg bg-white/60 border border-gray-200 text-gray-800 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-300"
                     />
@@ -267,9 +280,9 @@ export default function DemoSessionPage() {
 
                   <div>
                     <label className="text-gray-700 text-sm mb-2 block font-medium">Department</label>
-                    <select 
-                      name="department" 
-                      value={form.department} 
+                    <select
+                      name="department"
+                      value={form.department}
                       onChange={handleChange}
                       className="w-full p-3 rounded-lg bg-white/60 border border-gray-200 text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-300"
                     >
@@ -283,9 +296,9 @@ export default function DemoSessionPage() {
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="text-gray-700 text-sm mb-2 block font-medium">Year</label>
-                      <select 
-                        name="year" 
-                        value={form.year} 
+                      <select
+                        name="year"
+                        value={form.year}
                         onChange={handleChange}
                         className="w-full p-3 rounded-lg bg-white/60 border border-gray-200 text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-300"
                       >
@@ -298,9 +311,9 @@ export default function DemoSessionPage() {
 
                     <div>
                       <label className="text-gray-700 text-sm mb-2 block font-medium">Division</label>
-                      <select 
-                        name="division" 
-                        value={form.division} 
+                      <select
+                        name="division"
+                        value={form.division}
                         onChange={handleChange}
                         className="w-full p-3 rounded-lg bg-white/60 border border-gray-200 text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-300"
                       >
@@ -312,7 +325,21 @@ export default function DemoSessionPage() {
                     </div>
                   </div>
 
-                  <button 
+                  <div>
+                    <label className="text-gray-700 text-sm mb-2 block font-medium">Lecture Duration</label>
+                    <select
+                      name="duration"
+                      value={form.duration}
+                      onChange={handleChange}
+                      className="w-full p-3 rounded-lg bg-white/60 border border-gray-200 text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-300"
+                    >
+                      {durations.map(d => (
+                        <option key={d.value} value={d.value}>{d.label}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <button
                     onClick={createSession}
                     className="w-full py-3 px-4 rounded-lg font-semibold bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 text-white transition-all duration-300 flex items-center justify-center gap-3 mt-6 hover:shadow-lg hover:-translate-y-0.5"
                   >
@@ -321,11 +348,10 @@ export default function DemoSessionPage() {
                   </button>
 
                   {status && (
-                    <div className={`p-3 rounded-lg text-center ${
-                      status.includes("✅") ? "bg-green-100 border border-green-300 text-green-700" :
+                    <div className={`p-3 rounded-lg text-center ${status.includes("✅") ? "bg-green-100 border border-green-300 text-green-700" :
                       status.includes("❌") ? "bg-red-100 border border-red-300 text-red-700" :
-                      "bg-blue-100 border border-blue-300 text-blue-700"
-                    }`}>
+                        "bg-blue-100 border border-blue-300 text-blue-700"
+                      }`}>
                       {status}
                     </div>
                   )}
@@ -429,16 +455,14 @@ export default function DemoSessionPage() {
                     <h2 className="text-xl font-bold text-gray-800">Session Status</h2>
                   </div>
 
-                  <div className={`p-4 rounded-lg border-2 transition-all ${
-                    status.includes("✅") ? "bg-green-100 border-green-300" :
+                  <div className={`p-4 rounded-lg border-2 transition-all ${status.includes("✅") ? "bg-green-100 border-green-300" :
                     status.includes("❌") ? "bg-red-100 border-red-300" :
-                    "bg-blue-100 border-blue-300"
-                  }`}>
-                    <p className={`font-semibold text-center ${
-                      status.includes("✅") ? "text-green-700" :
-                      status.includes("❌") ? "text-red-700" :
-                      "text-blue-700"
+                      "bg-blue-100 border-blue-300"
                     }`}>
+                    <p className={`font-semibold text-center ${status.includes("✅") ? "text-green-700" :
+                      status.includes("❌") ? "text-red-700" :
+                        "text-blue-700"
+                      }`}>
                       {status || "Waiting for recognition..."}
                     </p>
                   </div>

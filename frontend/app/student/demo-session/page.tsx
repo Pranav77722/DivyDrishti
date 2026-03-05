@@ -29,9 +29,22 @@ export default function DemoSession() {
       });
       const data = await res.json();
 
-      if (data.success && data.faces && data.faces.length > 0) {
-        const face = data.faces[0];
-        setLastResult(face);
+      if (data.success) {
+        if (data.recognized && data.student) {
+          setLastResult({
+            match: { user_id: data.student.studentId, name: data.student.studentName },
+            distance: null,
+            confidence: data.confidence
+          });
+        } else if (data.faces_found > 0) {
+          setLastResult({
+            match: null,
+            distance: null,
+            confidence: data.confidence
+          });
+        } else {
+          setLastResult(null);
+        }
         setProcessedImage(data.processed_image || null);
       } else {
         setLastResult(null);
@@ -56,7 +69,7 @@ export default function DemoSession() {
               >
                 <ArrowLeft className="w-6 h-6 text-slate-600 group-hover:text-slate-800 transition-colors" />
               </button>
-              
+
               <div className="flex items-center gap-3">
                 <div className="p-3 bg-gradient-to-br from-purple-500 to-purple-600 rounded-xl shadow-lg">
                   <Camera className="w-6 h-6 text-white" />
@@ -70,17 +83,14 @@ export default function DemoSession() {
 
             {/* Status Indicator */}
             <div className="flex items-center gap-3">
-              <div className={`flex items-center gap-2 px-4 py-2 rounded-xl border-2 transition-all ${
-                isLiveActive 
-                  ? "bg-emerald-50 border-emerald-200 shadow-sm" 
+              <div className={`flex items-center gap-2 px-4 py-2 rounded-xl border-2 transition-all ${isLiveActive
+                  ? "bg-emerald-50 border-emerald-200 shadow-sm"
                   : "bg-slate-100 border-slate-200"
-              }`}>
-                <div className={`w-2 h-2 rounded-full ${
-                  isLiveActive ? "bg-emerald-500 animate-pulse" : "bg-slate-400"
-                }`} />
-                <span className={`text-sm font-semibold ${
-                  isLiveActive ? "text-emerald-700" : "text-slate-600"
                 }`}>
+                <div className={`w-2 h-2 rounded-full ${isLiveActive ? "bg-emerald-500 animate-pulse" : "bg-slate-400"
+                  }`} />
+                <span className={`text-sm font-semibold ${isLiveActive ? "text-emerald-700" : "text-slate-600"
+                  }`}>
                   {isLiveActive ? "LIVE" : "STANDBY"}
                 </span>
               </div>
@@ -97,11 +107,10 @@ export default function DemoSession() {
             <div className="flex flex-wrap gap-3">
               <button
                 onClick={() => setIsLiveActive(!isLiveActive)}
-                className={`px-6 py-3 rounded-xl font-semibold transition-all duration-300 flex items-center justify-center gap-3 border-2 ${
-                  isLiveActive 
-                    ? "bg-red-50 hover:bg-red-100 text-red-600 border-red-200 hover:border-red-300 shadow-sm" 
+                className={`px-6 py-3 rounded-xl font-semibold transition-all duration-300 flex items-center justify-center gap-3 border-2 ${isLiveActive
+                    ? "bg-red-50 hover:bg-red-100 text-red-600 border-red-200 hover:border-red-300 shadow-sm"
                     : "bg-emerald-50 hover:bg-emerald-100 text-emerald-600 border-emerald-200 hover:border-emerald-300 shadow-sm"
-                }`}
+                  }`}
               >
                 {isLiveActive ? (
                   <>
@@ -129,18 +138,16 @@ export default function DemoSession() {
             <div className="flex flex-wrap gap-4 text-sm">
               <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white border border-slate-200 shadow-sm">
                 <span className="text-slate-600 font-medium">Status:</span>
-                <span className={`font-semibold ${
-                  isLiveActive ? "text-emerald-600" : "text-amber-600"
-                }`}>
+                <span className={`font-semibold ${isLiveActive ? "text-emerald-600" : "text-amber-600"
+                  }`}>
                   {isLiveActive ? "Active" : "Inactive"}
                 </span>
               </div>
-              
+
               <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white border border-slate-200 shadow-sm">
                 <span className="text-slate-600 font-medium">Last Result:</span>
-                <span className={`font-semibold ${
-                  lastResult?.match ? "text-emerald-600" : "text-slate-600"
-                }`}>
+                <span className={`font-semibold ${lastResult?.match ? "text-emerald-600" : "text-slate-600"
+                  }`}>
                   {lastResult?.match ? "Match Found" : "No Match"}
                 </span>
               </div>
@@ -162,7 +169,7 @@ export default function DemoSession() {
                 </div>
                 <h2 className="text-xl font-bold text-slate-800">Camera Feed</h2>
               </div>
-              
+
               <div className="relative rounded-xl overflow-hidden bg-slate-100 border-2 border-slate-200">
                 <CameraCapture
                   isLiveMode={isLiveActive}
@@ -171,13 +178,13 @@ export default function DemoSession() {
                   facesData={
                     lastResult && lastResult.box
                       ? [{
-                          ...lastResult,
-                          box: lastResult.box
-                        }]
+                        ...lastResult,
+                        box: lastResult.box
+                      }]
                       : []
                   }
                 />
-                
+
                 {/* Overlay Status */}
                 {!isLiveActive && (
                   <div className="absolute inset-0 bg-slate-900/70 flex items-center justify-center backdrop-blur-sm">
@@ -204,24 +211,22 @@ export default function DemoSession() {
               {/* Results Content */}
               <div className="space-y-6">
                 {/* Status Card */}
-                <div className={`p-4 rounded-xl border-2 transition-all ${
-                  lastResult?.match 
-                    ? "bg-emerald-50 border-emerald-200 shadow-sm" 
+                <div className={`p-4 rounded-xl border-2 transition-all ${lastResult?.match
+                    ? "bg-emerald-50 border-emerald-200 shadow-sm"
                     : "bg-slate-50 border-slate-200"
-                }`}>
+                  }`}>
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-slate-600 text-sm font-medium">Status</span>
-                    <div className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                      lastResult?.match 
-                        ? "bg-emerald-100 text-emerald-700 border border-emerald-200" 
+                    <div className={`px-3 py-1 rounded-full text-xs font-semibold ${lastResult?.match
+                        ? "bg-emerald-100 text-emerald-700 border border-emerald-200"
                         : "bg-slate-100 text-slate-600 border border-slate-200"
-                    }`}>
+                      }`}>
                       {lastResult?.match ? "MATCH FOUND" : "NO MATCH"}
                     </div>
                   </div>
                   <p className="text-slate-800 font-bold">
-                    {lastResult?.match 
-                      ? `Identified: ${lastResult.match.name}` 
+                    {lastResult?.match
+                      ? `Identified: ${lastResult.match.name}`
                       : "No face recognized"}
                   </p>
                 </div>
@@ -296,17 +301,17 @@ export default function DemoSession() {
                 </div>
                 <h3 className="text-xl font-bold text-slate-800">Processed Image</h3>
               </div>
-              
+
               <div className="flex justify-center">
                 <div className="rounded-xl overflow-hidden bg-slate-100 border-2 border-slate-200 max-w-2xl shadow-lg">
-                  <img 
-                    src={processedImage} 
-                    alt="Processed" 
+                  <img
+                    src={processedImage}
+                    alt="Processed"
                     className="w-full h-auto max-h-96 object-contain"
                   />
                 </div>
               </div>
-              
+
               <p className="text-slate-600 text-sm mt-4 text-center">
                 AI-processed image with face detection and recognition overlay
               </p>

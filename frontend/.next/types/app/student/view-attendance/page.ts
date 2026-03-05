@@ -1,8 +1,8 @@
-// File: C:\Users\HP\Downloads\ROSPL-main\ROSPL-main\frontend\app\signin\page.tsx
-import * as entry from '../../../../app/signin/page.js'
+// File: D:\Attendance-Management-system-using-face-recognition\frontend\app\student\view-attendance\page.tsx
+import * as entry from '../../../../../app/student/view-attendance/page.js'
 import type { ResolvingMetadata, ResolvingViewport } from 'next/dist/lib/metadata/types/metadata-interface.js'
 
-type TEntry = typeof import('../../../../app/signin/page.js')
+type TEntry = typeof import('../../../../../app/student/view-attendance/page.js')
 
 type SegmentParams<T extends Object = any> = T extends Record<string, any>
   ? { [K in keyof T]: T[K] extends string ? string | string[] | undefined : never }

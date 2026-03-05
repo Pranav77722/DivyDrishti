@@ -1,4 +1,5 @@
-# student/demo_session.py - OPTIMIZED VERSION
+# student/demo_session.py - OPTIMIZED VERSION (Firebase Firestore)
+import json
 from flask import Blueprint, request, jsonify, current_app
 import time
 import base64
@@ -14,290 +15,289 @@ logger = logging.getLogger(__name__)
 
 demo_session_bp = Blueprint("demo_session", __name__)
 
+
 def read_image_from_bytes_optimized(b, target_size=(640, 480)):
     """Optimized image reading with size constraints"""
-    img = Image.open(io.BytesIO(b)).convert("RGB")
-
-    # Resize large images to reduce processing time
-    if img.width > target_size[0] or img.height > target_size[1]:
-        img.thumbnail(target_size, Image.Resampling.LANCZOS)
-
+    img = Image.open(io.BytesIO(b)).convert('RGB')
+    if img.size[0] > target_size[0] or img.size[1] > target_size[1]:
+        img.thumbnail(target_size, Image.LANCZOS)
     return np.array(img)
+
 
 def detect_faces_rgb_optimized(rgb_image, detector):
     """Optimized face detection using preloaded MTCNN detector"""
-    # Skip detection if image is too small
-    if rgb_image.shape[0] < 50 or rgb_image.shape[1] < 50:
-        return []
+    if detector is None:
+        raise RuntimeError("MTCNN detector not available")
 
     detections = detector.detect_faces(rgb_image)
     faces = []
-
     for d in detections:
-        if d["confidence"] > 0.85:  # Slightly lower threshold for speed
-            x, y, w, h = d["box"]
+        if d['confidence'] > 0.9:
+            x, y, w, h = d['box']
             x, y = max(0, x), max(0, y)
-            if w > 40 and h > 40:  # Filter small faces
-                face_rgb = rgb_image[y:y+h, x:x+w]
+            h_img, w_img = rgb_image.shape[:2]
+            x2 = min(x + w, w_img)
+            y2 = min(y + h, h_img)
+            if (x2 - x) > 50 and (y2 - y) > 50:
+                face_rgb = rgb_image[y:y2, x:x2]
                 faces.append({
-                    "box": (x, y, w, h), 
-                    "face": face_rgb, 
-                    "confidence": d["confidence"]
+                    'box': (x, y, x2 - x, y2 - y),
+                    'face': face_rgb,
+                    'confidence': d['confidence']
                 })
-
     return faces
+
 
 def extract_embedding_optimized(face_rgb):
     """Optimized embedding extraction using preloaded model"""
     try:
-        # Resize face to standard size
-        face_pil = Image.fromarray(face_rgb.astype("uint8")).resize((160, 160))
+        face_pil = Image.fromarray(face_rgb.astype('uint8')).resize((160, 160))
         face_array = np.array(face_pil)
-
-        # Use DeepFace with optimized parameters
         rep = DeepFace.represent(
-            face_array, 
-            model_name="Facenet512", 
-            detector_backend="skip",
-            enforce_detection=False  # Skip additional detection
+            face_array,
+            model_name='Facenet512',
+            detector_backend='skip',
+            enforce_detection=False
         )
-        return np.array(rep[0]["embedding"], dtype=np.float32)  # Use float32 for speed
-
+        return np.array(rep[0]['embedding'], dtype=float)
     except Exception as e:
         logger.error(f"Embedding extraction error: {e}")
         return None
+
 
 # In-memory cache for student embeddings (optional optimization)
 class EmbeddingCache:
     def __init__(self):
         self.student_embeddings = None
         self.last_update = 0
-        self.cache_duration = 300  # 5 minutes
+        self.cache_duration = 5  # 5 seconds for demo purposes
         self.lock = threading.Lock()
 
     def get_embeddings(self, students_col):
+        """Get cached embeddings from Firestore students collection."""
         current_time = time.time()
 
-        # Thread-safe cache check
         with self.lock:
-            if (self.student_embeddings is None or 
-                current_time - self.last_update > self.cache_duration):
+            if self.student_embeddings is not None and (current_time - self.last_update) < self.cache_duration:
+                return self.student_embeddings
 
-                logger.info("Refreshing embedding cache...")
+            logger.info("Refreshing embedding cache from Firestore...")
+            # Fetch students with face data from Firestore
+            docs = list(students_col.where('face_registered', '==', True).get())
 
-                # Fetch students with embeddings
-                students = list(students_col.find(
-                    {"embeddings": {"$exists": True, "$ne": None}},
-                    {"studentId": 1, "studentName": 1, "embeddings": 1}
-                ))
+            student_embeddings = []
+            for doc in docs:
+                data = doc.to_dict()
+                embeddings_raw = data.get('embeddings', [])
+                # Handle JSON string format (Firestore doesn't allow nested arrays)
+                if isinstance(embeddings_raw, str):
+                    embeddings = json.loads(embeddings_raw)
+                else:
+                    embeddings = embeddings_raw
+                if embeddings:
+                    student_embeddings.append({
+                        '_id': doc.id,
+                        'studentId': data.get('studentId'),
+                        'studentName': data.get('studentName'),
+                        'department': data.get('department'),
+                        'year': data.get('year'),
+                        'division': data.get('division'),
+                        'embeddings': embeddings
+                    })
 
-                # Process embeddings
-                self.student_embeddings = []
-                for student in students:
-                    embeddings = student.get('embeddings', [])
-                    if embeddings:
-                        # Average multiple embeddings if available
-                        avg_embedding = np.mean(embeddings, axis=0).astype(np.float32)
-                        self.student_embeddings.append({
-                            'embedding': avg_embedding,
-                            'studentId': student.get('studentId'),
-                            'studentName': student.get('studentName')
-                        })
+            self.student_embeddings = student_embeddings
+            self.last_update = current_time
+            logger.info(f"Cached {len(student_embeddings)} student embeddings")
+            return self.student_embeddings
 
-                self.last_update = current_time
-                logger.info(f"Cache refreshed with {len(self.student_embeddings)} students")
-
-        return self.student_embeddings
 
 # Global embedding cache instance
 embedding_cache = EmbeddingCache()
 
+
 def find_best_match_optimized(query_embedding, students_col, threshold=0.6):
     """Optimized database search with caching"""
-    cached_embeddings = embedding_cache.get_embeddings(students_col)
-
-    if not cached_embeddings:
-        return None, float('inf')
+    student_embeddings = embedding_cache.get_embeddings(students_col)
 
     best_match = None
     min_distance = float('inf')
 
-    # Vectorized comparison for speed
-    for student_data in cached_embeddings:
-        stored_embedding = student_data['embedding']
-        distance = cosine(query_embedding, stored_embedding)
+    for student in student_embeddings:
+        for stored_emb in student.get('embeddings', []):
+            distance = cosine(query_embedding, stored_emb)
+            if distance < min_distance:
+                min_distance = distance
+                best_match = student
 
-        if distance < min_distance:
-            min_distance = distance
-            best_match = student_data
+    if min_distance < threshold:
+        return best_match, min_distance
+    return None, min_distance
 
-    return best_match if min_distance < threshold else None, min_distance
 
-@demo_session_bp.route("/api/demo/recognize", methods=["POST"])
+@demo_session_bp.route('/api/demo/recognize', methods=['POST'])
 def demo_recognize_optimized():
     """OPTIMIZED face recognition endpoint using preloaded models"""
     start_time = time.time()
 
-    # Get model manager from Flask config
-    model_manager = current_app.config.get("MODEL_MANAGER")
-    if not model_manager or not model_manager.is_ready():
-        logger.error("Models not ready")
-        return jsonify({
-            "success": False, 
-            "error": "Face recognition models not initialized"
-        }), 503
-
-    # Get preloaded detector
-    detector = model_manager.get_detector()
-
-    data = request.get_json()
-    db = current_app.config.get("DB")
-    students_col = db.students
-    threshold = float(current_app.config.get("THRESHOLD", "0.6"))
-
-    image_b64 = data.get("image", "")
-    if image_b64.startswith("data:"):
-        image_b64 = image_b64.split(",", 1)[1]
-
     try:
-        # Optimized image processing
-        rgb = read_image_from_bytes_optimized(base64.b64decode(image_b64))
-    except Exception as e:
-        logger.error(f"Image processing error: {e}")
-        return jsonify({"success": False, "error": "Invalid base64 image"}), 400
+        # Get preloaded detector from app config
+        detector = current_app.config.get("MTCNN_DETECTOR")
+        if detector is None:
+            return jsonify({"success": False, "error": "Face detection model not ready"}), 503
 
-    # Face detection with timing
-    detection_start = time.time()
-    faces = detect_faces_rgb_optimized(rgb, detector)
-    detection_time = time.time() - detection_start
+        data = request.get_json()
+        if not data or 'image' not in data:
+            return jsonify({"success": False, "error": "Image data required"}), 400
 
-    if len(faces) == 0:
-        return jsonify({
-            "success": True, 
-            "faces": [],
-            "processing_time": round(time.time() - start_time, 3),
-            "detection_time": round(detection_time, 3)
-        })
+        image_b64 = data['image']
+        if image_b64.startswith("data:"):
+            image_b64 = image_b64.split(",", 1)[1]
 
-    results = []
+        # Read and process image
+        rgb_image = read_image_from_bytes_optimized(base64.b64decode(image_b64))
 
-    # Process each detected face
-    for f in faces:
-        embedding_start = time.time()
-        emb = extract_embedding_optimized(f["face"])
-        embedding_time = time.time() - embedding_start
+        # Detect faces
+        faces = detect_faces_rgb_optimized(rgb_image, detector)
 
-        if emb is None:
-            results.append({
-                "match": None, 
-                "distance": None, 
-                "box": f["box"],
-                "error": "Failed to extract embedding"
+        if not faces:
+            return jsonify({
+                "success": True,
+                "recognized": False,
+                "message": "No face detected",
+                "faces_found": 0,
+                "processing_time": round(time.time() - start_time, 3)
             })
-            continue
 
-        # Search for best match with timing
-        search_start = time.time()
-        best_match, min_distance = find_best_match_optimized(emb, students_col, threshold)
-        search_time = time.time() - search_start
+        # Process first/best face
+        best_face = max(faces, key=lambda f: f['confidence'])
+        embedding = extract_embedding_optimized(best_face['face'])
 
-        if best_match:
-            results.append({
-                "match": {
-                    "user_id": best_match["studentId"], 
-                    "name": best_match["studentName"]
+        if embedding is None:
+            return jsonify({
+                "success": True,
+                "recognized": False,
+                "message": "Could not extract face features",
+                "faces_found": len(faces),
+                "processing_time": round(time.time() - start_time, 3)
+            })
+
+        # Search for match using Firestore
+        db = current_app.config.get("DB")
+        students_col = db.students
+        threshold = current_app.config.get("THRESHOLD", 0.6)
+
+        match, distance = find_best_match_optimized(embedding, students_col, threshold)
+
+        processing_time = round(time.time() - start_time, 3)
+
+        if match:
+            return jsonify({
+                "success": True,
+                "recognized": True,
+                "student": {
+                    "studentId": match.get('studentId'),
+                    "studentName": match.get('studentName'),
+                    "department": match.get('department'),
+                    "year": match.get('year'),
+                    "division": match.get('division')
                 },
-                "distance": round(float(min_distance), 4),
-                "confidence": round((1 - min_distance) * 100, 1),
-                "box": f["box"],
-                "timing": {
-                    "embedding": round(embedding_time, 3),
-                    "search": round(search_time, 3)
-                }
+                "confidence": round(1 - distance, 4),
+                "faces_found": len(faces),
+                "processing_time": processing_time
             })
         else:
-            results.append({
-                "match": None, 
-                "distance": round(float(min_distance), 4), 
-                "box": f["box"],
-                "timing": {
-                    "embedding": round(embedding_time, 3),
-                    "search": round(search_time, 3)
-                }
+            return jsonify({
+                "success": True,
+                "recognized": False,
+                "message": "Face not recognized",
+                "confidence": round(1 - distance, 4) if distance < float('inf') else 0,
+                "faces_found": len(faces),
+                "processing_time": processing_time
             })
 
-    total_time = time.time() - start_time
+    except Exception as e:
+        logger.error(f"Demo recognition error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
 
-    return jsonify({
-        "success": True, 
-        "faces": results, 
-        "processing_time": round(total_time, 3),
-        "detailed_timing": {
-            "detection": round(detection_time, 3),
-            "total": round(total_time, 3)
-        },
-        "performance_info": {
-            "models_preloaded": True,
-            "cache_enabled": True
-        }
-    })
 
 @demo_session_bp.route('/api/demo/session', methods=['POST'])
 def create_demo_session():
     """Create a new demo session"""
-    db = current_app.config.get("DB")
-    demo_sessions_col = db.demo_sessions
+    try:
+        db = current_app.config.get("DB")
+        demo_col = db.demo_sessions
 
-    session_data = {
-        "session_id": f"demo_{int(time.time())}",
-        "started_at": time.time(),
-        "status": "active",
-        "recognitions": []
-    }
+        data = request.get_json() or {}
 
-    result = demo_sessions_col.insert_one(session_data)
-    session_data['_id'] = str(result.inserted_id)
+        session_doc = {
+            "created_at": time.time(),
+            "user_email": data.get('email', 'anonymous'),
+            "status": "active",
+            "recognitions": []
+        }
 
-    return jsonify({
-        "success": True,
-        "session": session_data
-    })
+        _, doc_ref = demo_col.add(session_doc)
+
+        return jsonify({
+            "success": True,
+            "session_id": doc_ref.id
+        })
+
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
 
 @demo_session_bp.route('/api/demo/session/<session_id>/log', methods=['POST'])
 def log_recognition(session_id):
     """Log recognition result to session"""
-    db = current_app.config.get("DB")
-    demo_sessions_col = db.demo_sessions
+    try:
+        db = current_app.config.get("DB")
+        demo_col = db.demo_sessions
 
-    data = request.get_json()
-    recognition_log = {
-        "timestamp": time.time(),
-        "result": data.get('result'),
-        "confidence": data.get('confidence'),
-        "processing_time": data.get('processing_time')
-    }
+        data = request.get_json()
+        if not data:
+            return jsonify({"success": False, "error": "Data required"}), 400
 
-    demo_sessions_col.update_one(
-        {"session_id": session_id},
-        {"$push": {"recognitions": recognition_log}}
-    )
+        doc_ref = demo_col.document(session_id)
+        doc = doc_ref.get()
+        if not doc.exists:
+            return jsonify({"success": False, "error": "Session not found"}), 404
 
-    return jsonify({"success": True, "message": "Recognition logged"})
+        # Add recognition log entry using array union
+        from google.cloud.firestore_v1 import ArrayUnion
+        doc_ref.update({
+            "recognitions": ArrayUnion([{
+                "timestamp": time.time(),
+                "recognized": data.get('recognized', False),
+                "student_id": data.get('studentId'),
+                "confidence": data.get('confidence', 0)
+            }])
+        })
 
-@demo_session_bp.route('/api/demo/models/status', methods=['GET'])
+        return jsonify({"success": True})
+
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@demo_session_bp.route('/api/demo/model-status', methods=['GET'])
 def model_status():
     """Check model status endpoint"""
-    model_manager = current_app.config.get("MODEL_MANAGER")
-
-    if not model_manager:
-        return jsonify({
-            "success": False,
-            "error": "Model manager not available"
-        }), 500
-
-    return jsonify({
-        "success": True,
-        "models_ready": model_manager.is_ready(),
-        "health_check": model_manager.health_check(),
-        "timestamp": time.time()
-    })
+    try:
+        model_manager = current_app.config.get("MODEL_MANAGER")
+        if model_manager and model_manager.is_ready():
+            return jsonify({
+                "success": True,
+                "models_ready": True,
+                "detector": "MTCNN",
+                "recognizer": "Facenet512",
+                "database": "firebase_firestore"
+            })
+        else:
+            return jsonify({
+                "success": True,
+                "models_ready": False,
+                "message": "Models are still loading"
+            })
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500

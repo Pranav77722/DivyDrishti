@@ -1,14 +1,18 @@
-# app.py - OPTIMIZED VERSION
+# app.py - OPTIMIZED VERSION (Firebase Firestore)
 import os
+# Fix for OpenMP duplicate library crash on Windows
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 import time
 import logging
 import threading
 from flask import Flask
 from flask_cors import CORS
-from pymongo import MongoClient
 from dotenv import load_dotenv
 from flask_bcrypt import Bcrypt
 import numpy as np
+
+# Firebase initialization
+from firebase_config import initialize_firebase, FirestoreDB
 
 # Blueprint imports
 from auth.routes import auth_bp
@@ -45,17 +49,13 @@ logger = logging.getLogger(__name__)
 
 load_dotenv()
 
-# MongoDB setup
-MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://localhost:27017/")
-DB_NAME = os.getenv("DATABASE_NAME", "facerecognition")
-COLLECTION_NAME = os.getenv("COLLECTION_NAME", "students")
-THRESHOLD = float(os.getenv("THRESHOLD", "0.6"))
+# Firebase setup
+logger.info("Initializing Firebase...")
+firestore_client = initialize_firebase()
+db = FirestoreDB(firestore_client)
 
-client = MongoClient(MONGODB_URI)
-db = client[DB_NAME]
-students_collection = db[COLLECTION_NAME]
-attendance_db = client["facerecognition_db"]
-attendance_collection = attendance_db["attendance_records"]
+COLLECTION_NAME = os.getenv("COLLECTION_NAME", "students")
+THRESHOLD = float(os.getenv("THRESHOLD", "0.3"))
 
 # OPTIMIZED MODEL MANAGER CLASS
 class ModelManager:
@@ -175,7 +175,6 @@ CORS(app)
 app.config["DB"] = db
 app.config["COLLECTION_NAME"] = COLLECTION_NAME
 app.config["THRESHOLD"] = THRESHOLD
-app.config["ATTENDANCE_COLLECTION"] = attendance_collection
 
 # CRITICAL: Pass model manager to Flask config so blueprints can access it
 app.config["MODEL_MANAGER"] = model_manager
@@ -194,6 +193,7 @@ def health_check():
         "status": "healthy" if model_status and model_health else "unhealthy",
         "models_ready": model_status,
         "models_healthy": model_health,
+        "database": "firebase_firestore",
         "timestamp": time.time()
     }
 

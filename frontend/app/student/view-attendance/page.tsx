@@ -13,6 +13,8 @@ interface AttendanceRecord {
   time: string;
   status: "present" | "absent";
   confidence: number;
+  teacherName?: string;
+  duration?: string;
 }
 
 export default function ViewAttendance() {
@@ -67,6 +69,8 @@ export default function ViewAttendance() {
           time: record.markedAt || record.time || "-",
           status: record.status || "present",
           confidence: record.confidence || 0,
+          teacherName: record.teacherName || record.teacher_name || "-",
+          duration: record.duration || "-",
         }));
         setAttendanceData(mappedData);
         setStats(data.stats);
@@ -272,6 +276,12 @@ export default function ViewAttendance() {
                       Name
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Teacher Name
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Duration
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Date
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -295,6 +305,12 @@ export default function ViewAttendance() {
                         {record.studentName}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        {record.teacherName}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        {record.duration ? `${record.duration} mins` : "-"}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                         {new Date(record.date).toLocaleDateString()}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
@@ -302,11 +318,10 @@ export default function ViewAttendance() {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span
-                          className={`px-2 py-1 text-xs rounded-full ${
-                            record.status === "present"
-                              ? "bg-green-100 text-green-800"
-                              : "bg-red-100 text-red-800"
-                          }`}
+                          className={`px-2 py-1 text-xs rounded-full ${record.status === "present"
+                            ? "bg-green-100 text-green-800"
+                            : "bg-red-100 text-red-800"
+                            }`}
                         >
                           {record.status}
                         </span>

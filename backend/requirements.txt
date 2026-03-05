@@ -1,6 +1,6 @@
 flask
 flask-cors
-pymongo
+firebase-admin
 deepface
 mtcnn
 numpy

@@ -1,5 +1,6 @@
 from flask import Blueprint, request, jsonify, current_app
 from flask_bcrypt import Bcrypt
+from firebase_config import doc_to_dict, query_results_to_list
 import time
 
 auth_bp = Blueprint("auth", __name__)
@@ -31,7 +32,8 @@ def api_signup():
         auth_col = db.auth_users
     
     # Check if email already exists in the appropriate collection
-    if auth_col.find_one({'email': email}):
+    existing_docs = auth_col.where('email', '==', email).limit(1).get()
+    if len(list(existing_docs)) > 0:
         return jsonify({
             "success": False, 
             "error": f"Email already registered as {user_type}"
@@ -57,7 +59,7 @@ def api_signup():
             "role": "teacher"
         })
     
-    auth_col.insert_one(user_doc)
+    auth_col.add(user_doc)
 
     return jsonify({
         "success": True, 
@@ -85,13 +87,17 @@ def api_signin():
         user_role = "student"
     
     # Find user in appropriate collection
-    user = auth_col.find_one({'email': email})
+    user_docs = list(auth_col.where('email', '==', email).limit(1).get())
     
-    if not user:
+    if not user_docs:
         return jsonify({
             "success": False, 
             "error": f"No {user_type} account found with this email"
         }), 401
+    
+    user_doc = user_docs[0]
+    user = user_doc.to_dict()
+    user['_id'] = user_doc.id
     
     # Check password
     if not bcrypt.check_password_hash(user['password'], password):
@@ -109,7 +115,7 @@ def api_signin():
 
     # Prepare response based on user type
     user_info = {
-        "_id": str(user['_id']),
+        "_id": user['_id'],
         "username": user['username'],
         "email": user['email'],
         "userType": user_type,
@@ -125,14 +131,16 @@ def api_signin():
         })
         
         # Check if teacher has student record too (optional)
-        student_record = db.students.find_one({'email': email})
-        if student_record:
+        student_docs = list(db.students.where('email', '==', email).limit(1).get())
+        if student_docs:
+            student_record = student_docs[0].to_dict()
             user_info['hasStudentRecord'] = True
             user_info['studentId'] = student_record.get('studentId')
     else:
         # For students, try to get student record
-        student_record = db.students.find_one({'email': email})
-        if student_record:
+        student_docs = list(db.students.where('email', '==', email).limit(1).get())
+        if student_docs:
+            student_record = student_docs[0].to_dict()
             user_info.update({
                 "studentId": student_record.get('studentId'),
                 "studentName": student_record.get('studentName'),
@@ -170,12 +178,16 @@ def get_user_profile():
     else:
         auth_col = db.auth_users
     
-    user = auth_col.find_one({'email': user_email}, {'password': 0})  # Exclude password
+    user_docs = list(auth_col.where('email', '==', user_email).limit(1).get())
     
-    if not user:
+    if not user_docs:
         return jsonify({"success": False, "error": "User not found"}), 404
     
-    user['_id'] = str(user['_id'])
+    user_doc = user_docs[0]
+    user = user_doc.to_dict()
+    user['_id'] = user_doc.id
+    # Exclude password from response
+    user.pop('password', None)
     
     return jsonify({
         "success": True,
@@ -201,17 +213,21 @@ def switch_user_role():
     else:
         target_col = db.auth_users
     
-    target_user = target_col.find_one({'email': user_email})
+    target_docs = list(target_col.where('email', '==', user_email).limit(1).get())
     
-    if not target_user:
+    if not target_docs:
         return jsonify({
             "success": False, 
             "error": f"No {target_type} account found for this email"
         }), 404
     
+    target_doc = target_docs[0]
+    target_user = target_doc.to_dict()
+    target_user['_id'] = target_doc.id
+    
     # Return user info for the target role
     user_info = {
-        "_id": str(target_user['_id']),
+        "_id": target_user['_id'],
         "username": target_user['username'],
         "email": target_user['email'],
         "userType": target_type

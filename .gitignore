@@ -1,3 +1,6 @@
+# Firebase credentials
+serviceAccountKey.json
+
 TrainingImage/
 TrainingImageLabel/
 # Byte-compiled / optimized / DLL files
